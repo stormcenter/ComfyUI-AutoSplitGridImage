@@ -2,6 +2,10 @@
 
 ComfyUI-AutoSplitGridImage is a custom node for ComfyUI that provides intelligent image splitting functionality. It combines edge detection for column splits and uniform division for row splits, offering a balanced approach to grid-based image segmentation.
 
+![example_workflow](./2024-10-23_10-59-03.png)
+
+![example_png](./ComfyUI_temp_zbacb_00001_.png)
+
 ## Features
 
 - Intelligent column splitting using edge detection
