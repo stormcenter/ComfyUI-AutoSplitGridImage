@@ -10,6 +10,8 @@ class GridImageSplitter:
                 "image": ("IMAGE",),
                 "rows": ("INT", {"default": 2, "min": 1, "max": 10}),
                 "cols": ("INT", {"default": 3, "min": 1, "max": 10}),
+                "row_split_method": (["uniform", "edge_detection"],),
+                "col_split_method": (["uniform", "edge_detection"],),
             },
         }
 
@@ -17,12 +19,14 @@ class GridImageSplitter:
     FUNCTION = "split_image"
     CATEGORY = "image/processing"
 
-    def find_split_positions(self, image, num_splits, is_vertical):
-        if is_vertical:
-            # 对于列，保持原有的边缘检测方法
+    def find_split_positions(self, image, num_splits, is_vertical, split_method):
+        if split_method == "uniform":
+            size = image.shape[1] if is_vertical else image.shape[0]
+            return [i * size // (num_splits + 1) for i in range(1, num_splits + 1)]
+        else:  # edge_detection
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
             edges = cv2.Canny(gray, 50, 150)
-            edge_density = np.sum(edges, axis=0)
+            edge_density = np.sum(edges, axis=0) if is_vertical else np.sum(edges, axis=1)
             
             window_size = len(edge_density) // (num_splits + 1) // 2
             smoothed_density = np.convolve(edge_density, np.ones(window_size)/window_size, mode='same')
@@ -33,14 +37,9 @@ class GridImageSplitter:
                 end = i * len(smoothed_density) // (num_splits + 1) + window_size
                 split = start + np.argmin(smoothed_density[start:end])
                 split_positions.append(split)
-        else:
-            # 对于行，使用均匀分割
-            height = image.shape[0]
-            split_positions = [i * height // (num_splits + 1) for i in range(1, num_splits + 1)]
-        
-        return split_positions
+            return split_positions
 
-    def split_image(self, image, rows, cols):
+    def split_image(self, image, rows, cols, row_split_method, col_split_method):
         print(f"Input image shape: {image.shape}")
         print(f"Input image dtype: {image.dtype}")
         
@@ -55,8 +54,8 @@ class GridImageSplitter:
         print(f"Original image size: {width}x{height}")
 
         # 找到分割位置
-        vertical_splits = self.find_split_positions(img_np, cols - 1, True)
-        horizontal_splits = self.find_split_positions(img_np, rows - 1, False)
+        vertical_splits = self.find_split_positions(img_np, cols - 1, True, col_split_method)
+        horizontal_splits = self.find_split_positions(img_np, rows - 1, False, row_split_method)
 
         # 创建预览图
         preview_img = image.clone()
