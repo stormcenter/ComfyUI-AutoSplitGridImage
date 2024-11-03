@@ -74,21 +74,21 @@ class GridImageSplitter:
         val = hsv[:, :, 2]
         
         # 使用更严格的白色区域条件
-        is_white = (sat < 15) & (val > 245)
+        is_white = (sat < 10) & (val > 248)  # 更严格的条件
         
         if is_vertical:
             white_ratios = np.mean(is_white, axis=1)
-            indices = np.where(white_ratios < 0.9)[0]
+            indices = np.where(white_ratios < 0.95)[0]  # 更高的阈值
         else:
             white_ratios = np.mean(is_white, axis=0)
-            indices = np.where(white_ratios < 0.9)[0]
+            indices = np.where(white_ratios < 0.95)[0]  # 更高的阈值
             
         if len(indices) == 0:
             return 0, img_strip.shape[1] if is_vertical else img_strip.shape[0]
             
         return indices[0], indices[-1]
 
-    def adjust_split_line(self, img_np, split_pos, is_vertical=True, margin=30):
+    def adjust_split_line(self, img_np, split_pos, is_vertical=True, margin=15):  # 减小检测范围
         """
         调整分割线附近的白色边界，使用更小的检测范围
         """
@@ -100,9 +100,9 @@ class GridImageSplitter:
             strip = img_np[:, left_bound:right_bound]
             start, end = self.detect_white_border(strip, False)
             
-            # 添加偏移以保留更多内容
-            start = max(0, start - 2)
-            end = min(strip.shape[1], end + 2)
+            # 添加更大的偏移以保留更多内容
+            start = max(0, start - 5)  # 增加保护边距
+            end = min(strip.shape[1], end + 5)
             
             return left_bound + start, left_bound + end
         else:
@@ -111,9 +111,9 @@ class GridImageSplitter:
             strip = img_np[top_bound:bottom_bound, :]
             start, end = self.detect_white_border(strip, True)
             
-            # 添加偏移以保留更多内容
-            start = max(0, start - 2)
-            end = min(strip.shape[0], end + 2)
+            # 添加更大的偏移以保留更多内容
+            start = max(0, start - 5)  # 增加保护边距
+            end = min(strip.shape[0], end + 5)
             
             return top_bound + start, top_bound + end
 
