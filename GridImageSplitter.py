@@ -65,7 +65,7 @@ class GridImageSplitter:
 
     def detect_white_border(self, img_strip, is_vertical=True):
         """
-        检测条带中的白色边界
+        检测条带中的白色边界，使用更保守的阈值
         """
         hsv = cv2.cvtColor(img_strip, cv2.COLOR_RGB2HSV)
         
@@ -73,24 +73,24 @@ class GridImageSplitter:
         sat = hsv[:, :, 1]
         val = hsv[:, :, 2]
         
-        # 白色区域条件
-        is_white = (sat < 20) & (val > 240)
+        # 使用更严格的白色区域条件
+        is_white = (sat < 15) & (val > 245)
         
         if is_vertical:
             white_ratios = np.mean(is_white, axis=1)
-            indices = np.where(white_ratios < 0.8)[0]
+            indices = np.where(white_ratios < 0.9)[0]
         else:
             white_ratios = np.mean(is_white, axis=0)
-            indices = np.where(white_ratios < 0.8)[0]
+            indices = np.where(white_ratios < 0.9)[0]
             
         if len(indices) == 0:
             return 0, img_strip.shape[1] if is_vertical else img_strip.shape[0]
             
         return indices[0], indices[-1]
 
-    def adjust_split_line(self, img_np, split_pos, is_vertical=True, margin=50):
+    def adjust_split_line(self, img_np, split_pos, is_vertical=True, margin=30):
         """
-        调整分割线附近的白色边界
+        调整分割线附近的白色边界，使用更小的检测范围
         """
         height, width = img_np.shape[:2]
         
@@ -99,12 +99,22 @@ class GridImageSplitter:
             right_bound = min(width, split_pos + margin)
             strip = img_np[:, left_bound:right_bound]
             start, end = self.detect_white_border(strip, False)
+            
+            # 添加偏移以保留更多内容
+            start = max(0, start - 2)
+            end = min(strip.shape[1], end + 2)
+            
             return left_bound + start, left_bound + end
         else:
             top_bound = max(0, split_pos - margin)
             bottom_bound = min(height, split_pos + margin)
             strip = img_np[top_bound:bottom_bound, :]
             start, end = self.detect_white_border(strip, True)
+            
+            # 添加偏移以保留更多内容
+            start = max(0, start - 2)
+            end = min(strip.shape[0], end + 2)
+            
             return top_bound + start, top_bound + end
 
     def find_split_positions(self, image, num_splits, is_vertical, split_method):
