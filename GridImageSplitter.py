@@ -19,111 +19,99 @@ class GridImageSplitter:
     FUNCTION = "split_image"
     CATEGORY = "image/processing"
 
-    def trim_white_borders(self, img_np):
+    def remove_external_borders(self, img_np):
         """
-        增强的白边裁剪算法，特别优化了对天空等浅色区域的处理
+        处理图片外部边缘的白边
         """
-        if len(img_np.shape) == 3:
-            # 转换为多个颜色空间以更好地检测边界
-            hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
-            lab = cv2.cvtColor(img_np, cv2.COLOR_RGB2LAB)
-            
-            # 提取各个通道
-            v_channel = hsv[:,:,2]
-            l_channel = lab[:,:,0]
-            
-            # 计算梯度
-            gradient_v = cv2.Sobel(v_channel, cv2.CV_64F, 1, 1, ksize=3)
-            gradient_l = cv2.Sobel(l_channel, cv2.CV_64F, 1, 1, ksize=3)
-            
-            # 综合多个指标
-            gradient_magnitude = np.sqrt(gradient_v**2 + gradient_l**2)
-            
-            # 创建掩码
-            mask = np.zeros_like(v_channel)
-            
-            # 基于梯度和亮度的自适应阈值
-            gradient_threshold = np.percentile(gradient_magnitude, 95) * 0.1
-            brightness_threshold = np.percentile(v_channel, 95) * 0.95
-            
-            # 更新掩码
-            mask[gradient_magnitude > gradient_threshold] = 255
-            mask[v_channel < brightness_threshold] = 255
-            
-            # 应用形态学操作
-            kernel = np.ones((3,3), np.uint8)
-            mask = cv2.dilate(mask, kernel, iterations=1)
-            mask = cv2.erode(mask, kernel, iterations=1)
-        else:
-            # 如果是灰度图像
-            gradient = cv2.Sobel(img_np, cv2.CV_64F, 1, 1, ksize=3)
-            mask = (gradient > np.percentile(gradient, 95) * 0.1).astype(np.uint8) * 255
+        if img_np.size == 0 or img_np is None:
+            return img_np
 
-        # 找到非边界区域
-        coords = cv2.findNonZero(mask)
-        if coords is None:
+        # 转换为HSV颜色空间
+        hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
+        
+        # 获取饱和度和亮度通道
+        sat = hsv[:, :, 1]
+        val = hsv[:, :, 2]
+        
+        # 定义白色区域的条件
+        is_white = (sat < 25) & (val > 230)
+        
+        height, width = img_np.shape[:2]
+        
+        # 查找非白色区域的边界
+        y_nonwhite = np.where(np.any(~is_white, axis=1))[0]
+        x_nonwhite = np.where(np.any(~is_white, axis=0))[0]
+        
+        if len(y_nonwhite) == 0 or len(x_nonwhite) == 0:
             return img_np
             
-        x, y, w, h = cv2.boundingRect(coords)
+        # 获取边界
+        top = y_nonwhite[0]
+        bottom = y_nonwhite[-1] + 1
+        left = x_nonwhite[0]
+        right = x_nonwhite[-1] + 1
         
-        # 智能边界调整
-        def adjust_boundary(start, end, size, is_start=True):
-            if is_start:
-                while start < end and start < size - 1:
-                    if np.any(mask[start:start+1, :] > 0):
-                        break
-                    start += 1
-                return max(0, start - 1)
-            else:
-                while end > start and end > 0:
-                    if np.any(mask[end-1:end, :] > 0):
-                        break
-                    end -= 1
-                return min(size, end + 1)
+        # 添加小边距
+        margin = 1
+        top = max(0, top - margin)
+        bottom = min(height, bottom + margin)
+        left = max(0, left - margin)
+        right = min(width, right + margin)
         
-        # 调整边界
-        y = adjust_boundary(y, y+h, img_np.shape[0], True)
-        h = adjust_boundary(y, y+h, img_np.shape[0], False) - y
-        x = adjust_boundary(x, x+w, img_np.shape[1], True)
-        w = adjust_boundary(x, x+w, img_np.shape[1], False) - x
-
         # 裁剪图像
-        cropped = img_np[y:y+h, x:x+w]
+        cropped = img_np[top:bottom, left:right]
         
-        # 边缘检查和优化
-        if cropped.shape[0] > 10 and cropped.shape[1] > 10:
-            edge_width = 3
-            edges = {
-                'top': cropped[:edge_width, :],
-                'bottom': cropped[-edge_width:, :],
-                'left': cropped[:, :edge_width],
-                'right': cropped[:, -edge_width:]
-            }
-            
-            for edge_name, edge in edges.items():
-                if len(edge.shape) == 3:
-                    edge_gradient = cv2.Sobel(cv2.cvtColor(edge, cv2.COLOR_RGB2LAB)[:,:,0], 
-                                            cv2.CV_64F, 1, 1, ksize=3)
-                else:
-                    edge_gradient = cv2.Sobel(edge, cv2.CV_64F, 1, 1, ksize=3)
-                
-                if np.mean(np.abs(edge_gradient)) < gradient_threshold:
-                    if edge_name == 'top' and y + edge_width < y + h:
-                        cropped = cropped[edge_width:, :]
-                    elif edge_name == 'bottom' and h - edge_width > 0:
-                        cropped = cropped[:-edge_width, :]
-                    elif edge_name == 'left' and x + edge_width < x + w:
-                        cropped = cropped[:, edge_width:]
-                    elif edge_name == 'right' and w - edge_width > 0:
-                        cropped = cropped[:, :-edge_width]
-
         return cropped
+
+    def detect_white_border(self, img_strip, is_vertical=True):
+        """
+        检测条带中的白色边界
+        """
+        hsv = cv2.cvtColor(img_strip, cv2.COLOR_RGB2HSV)
+        
+        # 获取饱和度和亮度
+        sat = hsv[:, :, 1]
+        val = hsv[:, :, 2]
+        
+        # 白色区域条件
+        is_white = (sat < 20) & (val > 240)
+        
+        if is_vertical:
+            white_ratios = np.mean(is_white, axis=1)
+            indices = np.where(white_ratios < 0.8)[0]
+        else:
+            white_ratios = np.mean(is_white, axis=0)
+            indices = np.where(white_ratios < 0.8)[0]
+            
+        if len(indices) == 0:
+            return 0, img_strip.shape[1] if is_vertical else img_strip.shape[0]
+            
+        return indices[0], indices[-1]
+
+    def adjust_split_line(self, img_np, split_pos, is_vertical=True, margin=50):
+        """
+        调整分割线附近的白色边界
+        """
+        height, width = img_np.shape[:2]
+        
+        if is_vertical:
+            left_bound = max(0, split_pos - margin)
+            right_bound = min(width, split_pos + margin)
+            strip = img_np[:, left_bound:right_bound]
+            start, end = self.detect_white_border(strip, False)
+            return left_bound + start, left_bound + end
+        else:
+            top_bound = max(0, split_pos - margin)
+            bottom_bound = min(height, split_pos + margin)
+            strip = img_np[top_bound:bottom_bound, :]
+            start, end = self.detect_white_border(strip, True)
+            return top_bound + start, top_bound + end
 
     def find_split_positions(self, image, num_splits, is_vertical, split_method):
         if split_method == "uniform":
             size = image.shape[1] if is_vertical else image.shape[0]
             return [i * size // (num_splits + 1) for i in range(1, num_splits + 1)]
-        else:  # edge_detection
+        else:
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
             edges = cv2.Canny(gray, 50, 150)
             edge_density = np.sum(edges, axis=0) if is_vertical else np.sum(edges, axis=1)
@@ -140,69 +128,92 @@ class GridImageSplitter:
             return split_positions
 
     def split_image(self, image, rows, cols, row_split_method, col_split_method):
-        print(f"Input image shape: {image.shape}")
-        print(f"Input image dtype: {image.dtype}")
-        
         if len(image.shape) == 3:
             image = image.unsqueeze(0)
         
         img_np = (image[0].cpu().numpy() * 255).astype(np.uint8)
-        
         height, width = img_np.shape[:2]
-        print(f"Original image size: {width}x{height}")
 
+        # 获取初始分割位置
         vertical_splits = self.find_split_positions(img_np, cols - 1, True, col_split_method)
         horizontal_splits = self.find_split_positions(img_np, rows - 1, False, row_split_method)
 
+        # 调整分割位置
+        adjusted_v_splits = []
+        for split in vertical_splits:
+            left, right = self.adjust_split_line(img_np, split, True)
+            adjusted_v_splits.extend([left, right])
+            
+        adjusted_h_splits = []
+        for split in horizontal_splits:
+            top, bottom = self.adjust_split_line(img_np, split, False)
+            adjusted_h_splits.extend([top, bottom])
+
+        # 创建预览图
         preview_img = image.clone()
-        
         green_line = torch.tensor([0.0, 1.0, 0.0]).view(1, 1, 1, 3)
+        
+        # 在原始分割线位置绘制绿线
         for x in vertical_splits:
             preview_img[:, :, x:x+2, :] = green_line
         for y in horizontal_splits:
             preview_img[:, y:y+2, :, :] = green_line
+
+        # 获取最终的分割边界
+        h_splits = [0] + sorted(adjusted_h_splits) + [height]
+        v_splits = [0] + sorted(adjusted_v_splits) + [width]
+
+        # 分割并处理子图
+        processed_cells = []
+        max_ratio = 0
         
-        split_images = []
-        h_splits = [0] + horizontal_splits + [height]
-        v_splits = [0] + vertical_splits + [width]
-        
-        max_height = 0
-        max_width = 0
-        temp_splits = []
-        
-        for i in range(len(h_splits) - 1):
-            for j in range(len(v_splits) - 1):
+        # 处理每个分割区域
+        for i in range(0, len(h_splits)-1, 2):
+            for j in range(0, len(v_splits)-1, 2):
                 top = h_splits[i]
                 bottom = h_splits[i+1]
                 left = v_splits[j]
                 right = v_splits[j+1]
                 
+                # 提取子图
                 cell_np = img_np[top:bottom, left:right]
-                trimmed_cell = self.trim_white_borders(cell_np)
                 
-                max_height = max(max_height, trimmed_cell.shape[0])
-                max_width = max(max_width, trimmed_cell.shape[1])
+                # 处理外部边缘
+                trimmed_cell = self.remove_external_borders(cell_np)
                 
-                temp_splits.append(trimmed_cell)
-        
-        for trimmed_cell in temp_splits:
-            cell_tensor = torch.from_numpy(trimmed_cell).float() / 255.0
+                # 计算比例并存储
+                h, w = trimmed_cell.shape[:2]
+                ratio = w / h
+                max_ratio = max(max_ratio, ratio)
+                processed_cells.append(trimmed_cell)
+
+        # 调整尺寸
+        target_height = 1024
+        target_width = int(target_height * max_ratio)
+        target_width = (target_width + 1) & ~1  # 确保宽度是偶数
+
+        # 调整所有图片大小并转换格式
+        split_images = []
+        for cell_np in processed_cells:
+            # 调整大小
+            resized = cv2.resize(cell_np, (target_width, target_height), 
+                               interpolation=cv2.INTER_LANCZOS4)
+            
+            # 转换为tensor
+            cell_tensor = torch.from_numpy(resized).float() / 255.0
             cell_tensor = cell_tensor.unsqueeze(0)
-            
-            pad_bottom = max_height - trimmed_cell.shape[0]
-            pad_right = max_width - trimmed_cell.shape[1]
-            cell_tensor = torch.nn.functional.pad(cell_tensor, (0, 0, 0, pad_right, 0, pad_bottom), mode='constant')
-            
             split_images.append(cell_tensor)
 
-        split_images = torch.cat(split_images, dim=0)
+        # 堆叠所有图片
+        stacked_images = torch.cat(split_images, dim=0)
+        
+        # 确保维度顺序正确
+        if stacked_images.shape[-1] != 3:
+            stacked_images = stacked_images.permute(0, 2, 3, 1)
 
-        print(f"Preview tensor shape: {preview_img.shape}")
-        print(f"Preview tensor dtype: {preview_img.dtype}")
-        print(f"Split images tensor shape: {split_images.shape}")
-        print(f"Split images tensor dtype: {split_images.dtype}")
-
-        return (preview_img, split_images)
+        print(f"Final stacked shape: {stacked_images.shape}")
+        
+        return (preview_img, stacked_images)
 
 NODE_CLASS_MAPPINGS = {
     "GridImageSplitter": GridImageSplitter
