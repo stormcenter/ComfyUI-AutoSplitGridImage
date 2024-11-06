@@ -88,7 +88,7 @@ class GridImageSplitter:
             
         return indices[0], indices[-1]
 
-    def adjust_split_line(self, img_np, split_pos, is_vertical=True, margin=15):  # 减小检测范围
+    def adjust_split_line(self, img_np, split_pos, is_vertical=True, margin=15):
         """
         调整分割线附近的白色边界，使用更小的检测范围
         """
@@ -100,8 +100,8 @@ class GridImageSplitter:
             strip = img_np[:, left_bound:right_bound]
             start, end = self.detect_white_border(strip, False)
             
-            # 添加更大的偏移以保留更多内容
-            start = max(0, start - 5)  # 增加保护边距
+            # 添加偏移以保留更多内容
+            start = max(0, start - 5)  # 向外扩展几个像素
             end = min(strip.shape[1], end + 5)
             
             return left_bound + start, left_bound + end
@@ -111,13 +111,16 @@ class GridImageSplitter:
             strip = img_np[top_bound:bottom_bound, :]
             start, end = self.detect_white_border(strip, True)
             
-            # 添加更大的偏移以保留更多内容
-            start = max(0, start - 5)  # 增加保护边距
+            # 添加偏移以保留更多内容
+            start = max(0, start - 5)  # 向外扩展几个像素
             end = min(strip.shape[0], end + 5)
             
             return top_bound + start, top_bound + end
 
     def find_split_positions(self, image, num_splits, is_vertical, split_method):
+        """
+        找到分割位置
+        """
         if split_method == "uniform":
             size = image.shape[1] if is_vertical else image.shape[0]
             return [i * size // (num_splits + 1) for i in range(1, num_splits + 1)]
@@ -137,6 +140,23 @@ class GridImageSplitter:
                 split_positions.append(split)
             return split_positions
 
+    def process_second_row(self, cells):
+        """
+        处理第二行图片 - 固定裁剪上部30像素
+        """
+        processed_cells = []
+        trim_pixels = 30  # 固定裁剪像素数
+        
+        for cell in cells:
+            height = cell.shape[0]
+            if height > trim_pixels:
+                # 从第30个像素开始裁剪
+                cropped = cell[trim_pixels:, :]
+                processed_cells.append(cropped)
+            else:
+                processed_cells.append(cell)
+        return processed_cells
+
     def split_image(self, image, rows, cols, row_split_method, col_split_method):
         if len(image.shape) == 3:
             image = image.unsqueeze(0)
@@ -144,9 +164,17 @@ class GridImageSplitter:
         img_np = (image[0].cpu().numpy() * 255).astype(np.uint8)
         height, width = img_np.shape[:2]
 
-        # 获取初始分割位置
+        # 获取分割位置
         vertical_splits = self.find_split_positions(img_np, cols - 1, True, col_split_method)
         horizontal_splits = self.find_split_positions(img_np, rows - 1, False, row_split_method)
+
+        # 创建预览图
+        preview_img = image.clone()
+        green_line = torch.tensor([0.0, 1.0, 0.0]).view(1, 1, 1, 3)
+        for x in vertical_splits:
+            preview_img[:, :, x:x+2, :] = green_line
+        for y in horizontal_splits:
+            preview_img[:, y:y+2, :, :] = green_line
 
         # 调整分割位置
         adjusted_v_splits = []
@@ -159,65 +187,66 @@ class GridImageSplitter:
             top, bottom = self.adjust_split_line(img_np, split, False)
             adjusted_h_splits.extend([top, bottom])
 
-        # 创建预览图
-        preview_img = image.clone()
-        green_line = torch.tensor([0.0, 1.0, 0.0]).view(1, 1, 1, 3)
-        
-        # 在原始分割线位置绘制绿线
-        for x in vertical_splits:
-            preview_img[:, :, x:x+2, :] = green_line
-        for y in horizontal_splits:
-            preview_img[:, y:y+2, :, :] = green_line
-
-        # 获取最终的分割边界
+        # 获取分割边界
         h_splits = [0] + sorted(adjusted_h_splits) + [height]
         v_splits = [0] + sorted(adjusted_v_splits) + [width]
 
-        # 分割并处理子图
-        processed_cells = []
+        # 处理所有分割区域
+        original_cells = []
+        second_row_cells = []
         max_ratio = 0
         
-        # 处理每个分割区域
         for i in range(0, len(h_splits)-1, 2):
+            row_cells = []
             for j in range(0, len(v_splits)-1, 2):
                 top = h_splits[i]
                 bottom = h_splits[i+1]
                 left = v_splits[j]
                 right = v_splits[j+1]
                 
-                # 提取子图
                 cell_np = img_np[top:bottom, left:right]
-                
-                # 处理外部边缘
                 trimmed_cell = self.remove_external_borders(cell_np)
                 
-                # 计算比例并存储
+                # 存储原始裁剪结果
+                original_cells.append(trimmed_cell)
+                
+                # 如果是第二行，存储额外的单元格
+                if i == 2:  # 第二行
+                    row_cells.append(trimmed_cell)
+                
+                # 更新最大比例
                 h, w = trimmed_cell.shape[:2]
                 ratio = w / h
                 max_ratio = max(max_ratio, ratio)
-                processed_cells.append(trimmed_cell)
 
-        # 调整尺寸
+        # 处理第二行的额外裁剪
+        if row_cells:
+            second_row_processed = self.process_second_row(row_cells)
+            # 更新最大比例
+            for cell in second_row_processed:
+                h, w = cell.shape[:2]
+                ratio = w / h
+                max_ratio = max(max_ratio, ratio)
+            second_row_cells.extend(second_row_processed)
+
+        # 合并所有需要处理的图片
+        all_cells = original_cells + second_row_cells
+
+        # 调整大小和格式转换
         target_height = 1024
         target_width = int(target_height * max_ratio)
-        target_width = (target_width + 1) & ~1  # 确保宽度是偶数
+        target_width = (target_width + 1) & ~1
 
-        # 调整所有图片大小并转换格式
         split_images = []
-        for cell_np in processed_cells:
-            # 调整大小
+        for cell_np in all_cells:
             resized = cv2.resize(cell_np, (target_width, target_height), 
                                interpolation=cv2.INTER_LANCZOS4)
-            
-            # 转换为tensor
             cell_tensor = torch.from_numpy(resized).float() / 255.0
             cell_tensor = cell_tensor.unsqueeze(0)
             split_images.append(cell_tensor)
 
-        # 堆叠所有图片
         stacked_images = torch.cat(split_images, dim=0)
         
-        # 确保维度顺序正确
         if stacked_images.shape[-1] != 3:
             stacked_images = stacked_images.permute(0, 2, 3, 1)
 
