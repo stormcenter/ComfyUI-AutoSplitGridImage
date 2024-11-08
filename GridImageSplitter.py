@@ -21,67 +21,136 @@ class GridImageSplitter:
 
     def remove_external_borders(self, img_np):
         """
-        处理图片外部边缘的白边
+        处理外部边缘，加强对黑色边框的检测
         """
         if img_np.size == 0 or img_np is None:
             return img_np
 
-        # 转换为HSV颜色空间
+        # 转换为多个色彩空间
+        gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
         hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
-        
-        # 获取饱和度和亮度通道
-        sat = hsv[:, :, 1]
-        val = hsv[:, :, 2]
-        
-        # 定义白色区域的条件
-        is_white = (sat < 25) & (val > 230)
         
         height, width = img_np.shape[:2]
         
-        # 查找非白色区域的边界
-        y_nonwhite = np.where(np.any(~is_white, axis=1))[0]
-        x_nonwhite = np.where(np.any(~is_white, axis=0))[0]
+        # 最小裁剪量
+        min_trim = 18
+        # 检查范围扩大到30像素
+        check_width = 30
         
-        if len(y_nonwhite) == 0 or len(x_nonwhite) == 0:
+        def is_black_region(region):
+            """检查区域是否为黑色区域"""
+            if len(region.shape) == 3:
+                region_gray = cv2.cvtColor(region, cv2.COLOR_RGB2GRAY)
+            else:
+                region_gray = region
+                
+            # 计算暗色像素的比例
+            dark_ratio = np.mean(region_gray < 40)
+            # 如果超过60%的像素是暗色的，认为是黑边
+            return dark_ratio > 0.6
+
+        def is_white_region(region):
+            """检查区域是否为白色区域"""
+            if len(region.shape) == 3:
+                region_hsv = cv2.cvtColor(region, cv2.COLOR_RGB2HSV)
+                sat_mean = np.mean(region_hsv[:,:,1])
+                val_mean = np.mean(region_hsv[:,:,2])
+                return sat_mean < 30 and val_mean > 225
+            return False
+
+        def find_border(gray_img, is_vertical=True, from_start=True):
+            """查找边界"""
+            if is_vertical:
+                total_size = width
+                chunk_size = 5  # 每次检查5个像素
+            else:
+                total_size = height
+                chunk_size = 5
+
+            if from_start:
+                range_iter = range(0, total_size-chunk_size, chunk_size)
+            else:
+                range_iter = range(total_size-chunk_size, 0, -chunk_size)
+
+            for i in range_iter:
+                if is_vertical:
+                    chunk = img_np[:, i:i+chunk_size] if from_start else img_np[:, i-chunk_size:i]
+                else:
+                    chunk = img_np[i:i+chunk_size, :] if from_start else img_np[i-chunk_size:i, :]
+                
+                # 分别检查黑边和白边
+                if not (is_black_region(chunk) or is_white_region(chunk)):
+                    return i if from_start else i
+                    
+            return min_trim if from_start else total_size - min_trim
+
+        # 检测左边界
+        left = find_border(gray, is_vertical=True, from_start=True)
+        
+        # 检测右边界
+        right = find_border(gray, is_vertical=True, from_start=False)
+        
+        # 检测上边界
+        top = find_border(gray, is_vertical=False, from_start=True)
+        
+        # 检测下边界
+        bottom = find_border(gray, is_vertical=False, from_start=False)
+
+        # 强制应用最小裁剪
+        # 检查左侧边缘
+        left_region = gray[:, :check_width]
+        if np.mean(left_region < 40) > 0.3:  # 如果有超过30%的暗色像素
+            left = max(left, min_trim)
+
+        # 检查右侧边缘
+        right_region = gray[:, -check_width:]
+        if np.mean(right_region < 40) > 0.3:  # 如果有超过30%的暗色像素
+            right = min(right, width - min_trim)
+
+        # 检查上边缘
+        top_region = gray[:check_width, :]
+        if np.mean(top_region < 40) > 0.3:
+            top = max(top, min_trim)
+
+        # 检查下边缘
+        bottom_region = gray[-check_width:, :]
+        if np.mean(bottom_region < 40) > 0.3:
+            bottom = min(bottom, height - min_trim)
+
+        # 确保裁剪合理
+        if (right - left) < width * 0.5 or (bottom - top) < height * 0.5:
             return img_np
-            
-        # 获取边界
-        top = y_nonwhite[0]
-        bottom = y_nonwhite[-1] + 1
-        left = x_nonwhite[0]
-        right = x_nonwhite[-1] + 1
-        
-        # 添加小边距
-        margin = 1
-        top = max(0, top - margin)
-        bottom = min(height, bottom + margin)
-        left = max(0, left - margin)
-        right = min(width, right + margin)
-        
-        # 裁剪图像
+
+        # 应用裁剪
         cropped = img_np[top:bottom, left:right]
         
+        # 进行二次检查，确保没有遗漏的黑边
+        if cropped.shape[1] > 2 * min_trim:
+            right_edge = cv2.cvtColor(cropped[:, -min_trim:], cv2.COLOR_RGB2GRAY)
+            if np.mean(right_edge < 40) > 0.3:
+                cropped = cropped[:, :-min_trim]
+                
         return cropped
-
-    def detect_white_border(self, img_strip, is_vertical=True):
+    def detect_split_borders(self, img_strip, is_vertical=True):
         """
-        检测条带中的白色边界，使用更保守的阈值
+        检测分割线区域的边框
         """
         hsv = cv2.cvtColor(img_strip, cv2.COLOR_RGB2HSV)
+        lab = cv2.cvtColor(img_strip, cv2.COLOR_RGB2LAB)
         
-        # 获取饱和度和亮度
         sat = hsv[:, :, 1]
         val = hsv[:, :, 2]
+        l_channel = lab[:, :, 0]
         
-        # 使用更严格的白色区域条件
-        is_white = (sat < 10) & (val > 248)  # 更严格的条件
+        # 检测白色和黑色区域
+        is_border = ((sat < 10) & (val > 248)) | (l_channel < 30)
         
         if is_vertical:
-            white_ratios = np.mean(is_white, axis=1)
-            indices = np.where(white_ratios < 0.95)[0]  # 更高的阈值
+            border_ratios = np.mean(is_border, axis=1)
+            indices = np.where(border_ratios < 0.95)[0]
         else:
-            white_ratios = np.mean(is_white, axis=0)
-            indices = np.where(white_ratios < 0.95)[0]  # 更高的阈值
+            border_ratios = np.mean(is_border, axis=0)
+            indices = np.where(border_ratios < 0.95)[0]
             
         if len(indices) == 0:
             return 0, img_strip.shape[1] if is_vertical else img_strip.shape[0]
@@ -90,7 +159,7 @@ class GridImageSplitter:
 
     def adjust_split_line(self, img_np, split_pos, is_vertical=True, margin=15):
         """
-        调整分割线附近的白色边界，使用更小的检测范围
+        调整分割线附近的边界
         """
         height, width = img_np.shape[:2]
         
@@ -98,10 +167,9 @@ class GridImageSplitter:
             left_bound = max(0, split_pos - margin)
             right_bound = min(width, split_pos + margin)
             strip = img_np[:, left_bound:right_bound]
-            start, end = self.detect_white_border(strip, False)
+            start, end = self.detect_split_borders(strip, False)
             
-            # 添加偏移以保留更多内容
-            start = max(0, start - 5)  # 向外扩展几个像素
+            start = max(0, start - 5)
             end = min(strip.shape[1], end + 5)
             
             return left_bound + start, left_bound + end
@@ -109,18 +177,14 @@ class GridImageSplitter:
             top_bound = max(0, split_pos - margin)
             bottom_bound = min(height, split_pos + margin)
             strip = img_np[top_bound:bottom_bound, :]
-            start, end = self.detect_white_border(strip, True)
+            start, end = self.detect_split_borders(strip, True)
             
-            # 添加偏移以保留更多内容
-            start = max(0, start - 5)  # 向外扩展几个像素
+            start = max(0, start - 5)
             end = min(strip.shape[0], end + 5)
             
             return top_bound + start, top_bound + end
 
     def find_split_positions(self, image, num_splits, is_vertical, split_method):
-        """
-        找到分割位置
-        """
         if split_method == "uniform":
             size = image.shape[1] if is_vertical else image.shape[0]
             return [i * size // (num_splits + 1) for i in range(1, num_splits + 1)]
@@ -145,12 +209,11 @@ class GridImageSplitter:
         处理第二行图片 - 固定裁剪上部30像素
         """
         processed_cells = []
-        trim_pixels = 30  # 固定裁剪像素数
+        trim_pixels = 30
         
         for cell in cells:
             height = cell.shape[0]
             if height > trim_pixels:
-                # 从第30个像素开始裁剪
                 cropped = cell[trim_pixels:, :]
                 processed_cells.append(cropped)
             else:
