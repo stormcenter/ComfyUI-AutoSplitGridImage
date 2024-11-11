@@ -131,6 +131,7 @@ class GridImageSplitter:
                 cropped = cropped[:, :-min_trim]
                 
         return cropped
+
     def detect_split_borders(self, img_strip, is_vertical=True):
         """
         检测分割线区域的边框
@@ -204,22 +205,6 @@ class GridImageSplitter:
                 split_positions.append(split)
             return split_positions
 
-    def process_second_row(self, cells):
-        """
-        处理第二行图片 - 固定裁剪上部30像素
-        """
-        processed_cells = []
-        trim_pixels = 30
-        
-        for cell in cells:
-            height = cell.shape[0]
-            if height > trim_pixels:
-                cropped = cell[trim_pixels:, :]
-                processed_cells.append(cropped)
-            else:
-                processed_cells.append(cell)
-        return processed_cells
-
     def split_image(self, image, rows, cols, row_split_method, col_split_method):
         if len(image.shape) == 3:
             image = image.unsqueeze(0)
@@ -255,12 +240,13 @@ class GridImageSplitter:
         v_splits = [0] + sorted(adjusted_v_splits) + [width]
 
         # 处理所有分割区域
-        original_cells = []
-        second_row_cells = []
-        max_ratio = 0
+        split_images = []
+        max_h = 0
+        max_w = 0
         
+        # 第一次遍历: 找出所有裁剪后图片的最大宽度和高度
+        temp_splits = []
         for i in range(0, len(h_splits)-1, 2):
-            row_cells = []
             for j in range(0, len(v_splits)-1, 2):
                 top = h_splits[i]
                 bottom = h_splits[i+1]
@@ -269,42 +255,29 @@ class GridImageSplitter:
                 
                 cell_np = img_np[top:bottom, left:right]
                 trimmed_cell = self.remove_external_borders(cell_np)
+                temp_splits.append(trimmed_cell)
                 
-                # 存储原始裁剪结果
-                original_cells.append(trimmed_cell)
-                
-                # 如果是第二行，存储额外的单元格
-                if i == 2:  # 第二行
-                    row_cells.append(trimmed_cell)
-                
-                # 更新最大比例
                 h, w = trimmed_cell.shape[:2]
-                ratio = w / h
-                max_ratio = max(max_ratio, ratio)
-
-        # 处理第二行的额外裁剪
-        if row_cells:
-            second_row_processed = self.process_second_row(row_cells)
-            # 更新最大比例
-            for cell in second_row_processed:
-                h, w = cell.shape[:2]
-                ratio = w / h
-                max_ratio = max(max_ratio, ratio)
-            second_row_cells.extend(second_row_processed)
-
-        # 合并所有需要处理的图片
-        all_cells = original_cells + second_row_cells
-
-        # 调整大小和格式转换
-        target_height = 1024
-        target_width = int(target_height * max_ratio)
-        target_width = (target_width + 1) & ~1
-
-        split_images = []
-        for cell_np in all_cells:
-            resized = cv2.resize(cell_np, (target_width, target_height), 
-                               interpolation=cv2.INTER_LANCZOS4)
-            cell_tensor = torch.from_numpy(resized).float() / 255.0
+                max_h = max(max_h, h)
+                max_w = max(max_w, w)
+        
+        # 第二次遍历: 将所有图片调整为相同尺寸，保持原始比例
+        for cell_np in temp_splits:
+            h, w = cell_np.shape[:2]
+            # 计算缩放比例
+            scale = min(max_h/h, max_w/w)
+            new_h = int(h * scale)
+            new_w = int(w * scale)
+            
+            # 居中放置
+            resized = cv2.resize(cell_np, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+            canvas = np.zeros((max_h, max_w, 3), dtype=np.uint8)
+            y_offset = (max_h - new_h) // 2
+            x_offset = (max_w - new_w) // 2
+            canvas[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
+            
+            # 转换为tensor
+            cell_tensor = torch.from_numpy(canvas).float() / 255.0
             cell_tensor = cell_tensor.unsqueeze(0)
             split_images.append(cell_tensor)
 
@@ -312,7 +285,7 @@ class GridImageSplitter:
         
         if stacked_images.shape[-1] != 3:
             stacked_images = stacked_images.permute(0, 2, 3, 1)
-
+            
         print(f"Final stacked shape: {stacked_images.shape}")
         
         return (preview_img, stacked_images)
