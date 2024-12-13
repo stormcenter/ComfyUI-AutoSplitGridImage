@@ -1,7 +1,9 @@
-from .GridImageSplitter import GridImageSplitter, NODE_CLASS_MAPPINGS
+from .GridImageSplitter import GridImageSplitter
+from .EvenImageResizer import EvenImageResizer, NODE_CLASS_MAPPINGS as EVEN_RESIZER_NODE_CLASS_MAPPINGS
 
-__all__ = ['GridImageSplitter']
+__all__ = ['GridImageSplitter', 'EvenImageResizer']
 
-NODE_CLASS_MAPPINGS.update({
-    "GridImageSplitter": GridImageSplitter
-})
+NODE_CLASS_MAPPINGS = {
+    "GridImageSplitter": GridImageSplitter,
+    "EvenImageResizer": EvenImageResizer
+}

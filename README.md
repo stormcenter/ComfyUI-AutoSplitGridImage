@@ -6,6 +6,8 @@ ComfyUI-AutoSplitGridImage is a custom node for ComfyUI that provides flexible i
 
 ![example_png](./ComfyUI_temp_zbacb_00001_.png)
 
+![example_png](./Screenshot_2024-12-13_15-30-41.png)
+
 ## Features
 
 - Customizable splitting methods for both rows and columns
@@ -13,6 +15,7 @@ ComfyUI-AutoSplitGridImage is a custom node for ComfyUI that provides flexible i
 - Adjustable number of rows and columns
 - Preview image with grid lines
 - Outputs both the preview image and individual grid cells
+- Automatic even dimension resizing with EvenImageResizer node
 
 ## Installation
 
@@ -25,6 +28,7 @@ ComfyUI-AutoSplitGridImage is a custom node for ComfyUI that provides flexible i
 
 ## Usage
 
+### GridImageSplitter Node
 1. In the ComfyUI interface, find the "GridImageSplitter" node under the "image/processing" category.
 2. Connect an image output to the "image" input of the GridImageSplitter node.
 3. Set the desired number of rows and columns.
@@ -33,18 +37,28 @@ ComfyUI-AutoSplitGridImage is a custom node for ComfyUI that provides flexible i
    - A preview image showing the grid lines
    - A tensor containing all the split image cells
 
+### EvenImageResizer Node
+1. Find the "EvenImageResizer" node under the "image/processing" category.
+2. Connect an image output to the "image" input.
+3. The node will automatically ensure the output image has even dimensions by trimming if necessary.
+
 ## Parameters
 
+### GridImageSplitter
 - `image`: Input image to be split
 - `rows`: Number of rows to split the image into (default: 2, range: 1-10)
 - `cols`: Number of columns to split the image into (default: 3, range: 1-10)
 - `row_split_method`: Method to split rows ("uniform" or "edge_detection")
 - `col_split_method`: Method to split columns ("uniform" or "edge_detection")
 
+### EvenImageResizer
+- `image`: Input image to be processed
+
 ## How It Works
 
 - Uniform Splitting: Divides the image into equal parts along the specified axis.
 - Edge Detection Splitting: Uses OpenCV's Canny edge detection to find natural splitting points in the image.
+- Even Dimension Resizing: Automatically trims images to ensure both width and height are even numbers.
 
 ## Contributing
 
