@@ -1,0 +1,15 @@
+[project]
+name = "comfyui-autosplitgridimage"
+description = "ComfyUI-AutoSplitGridImage is a custom node for ComfyUI that provides intelligent image splitting functionality. It combines edge detection for column splits and uniform division for row splits, offering a balanced approach to grid-based image segmentation."
+version = "1.0.0"
+license = {file = "LICENSE"}
+dependencies = ["numpy>=1.21.0", "opencv-python>=4.5.0", "pillow>=8.0.0", "torch>=1.7.0"]
+
+[project.urls]
+Repository = "https://github.com/stormcenter/ComfyUI-AutoSplitGridImage"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI-AutoSplitGridImage"
+Icon = ""
