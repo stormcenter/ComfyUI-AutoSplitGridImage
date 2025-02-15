@@ -77,7 +77,9 @@ class GridImageSplitter:
                     chunk = img_np[:, i:i+chunk_size] if from_start else img_np[:, i-chunk_size:i]
                 else:
                     chunk = img_np[i:i+chunk_size, :] if from_start else img_np[i-chunk_size:i, :]
-                
+                # 检查chunk是否有效
+                if chunk.shape[0] == 0 or chunk.shape[1] == 0 :
+                    continue
                 # 分别检查黑边和白边
                 if not (is_black_region(chunk) or is_white_region(chunk)):
                     return i if from_start else i
